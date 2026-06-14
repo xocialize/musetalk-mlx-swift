@@ -20,11 +20,10 @@ public enum TalkingHeadIO {
         throw TalkingHeadError.notWired("audio decode (AVFoundation)")
     }
 
-    /// 80-mel log-mel spectrogram for the whisper-tiny encoder: STFT n_fft=400/hop=160, periodic
-    /// Hann, center+reflect pad, drop the trailing frame, slaney 80-mel filterbank, log10 clamp.
-    /// (Port of musetalk_mlx/whisper/log_mel.py; ship `mel_filters_80` as a resource.)
+    /// 80-mel log-mel spectrogram for the whisper-tiny encoder (parity-gated, rel 1.4e-4 vs the
+    /// Python reference). Delegates to the core `AudioFeatures.logMel80`.
     public static func logMel80(_ wav: MLXArray) throws -> MLXArray {
-        throw TalkingHeadError.notWired("80-mel log-mel frontend")
+        AudioFeatures.logMel80(wav)
     }
 
     /// Crop `box` from `frame`, resize to `size`², return normalized BGR uint8 (HxWx3) for the VAE.

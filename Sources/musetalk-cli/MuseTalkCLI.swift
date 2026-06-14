@@ -38,6 +38,9 @@ struct MuseTalkCLI: AsyncParsableCommand {
     @Option(help: "S2 audio-framing golden (.safetensors: stacked/chunks/librosa_length)")
     var audioChunkGolden: String?
 
+    @Option(help: "80-mel log-mel golden (.safetensors: wav/mel)")
+    var melGolden: String?
+
     @Option(help: "bisenet parity golden (.safetensors: input/feat_out/argmax); needs --bisenet-weights")
     var bisenetGolden: String?
 
@@ -156,6 +159,14 @@ struct MuseTalkCLI: AsyncParsableCommand {
 
         if let visionCropGolden {
             try validateVisionCrop(visionCropGolden)
+        }
+
+        if let melGolden {
+            let g = try loadArrays(url: URL(fileURLWithPath: melGolden))
+            let mel = AudioFeatures.logMel80(g["wav"]!)
+            eval(mel)
+            print(String(format: "[S2] log-mel 80         rel=%.3e  max|Δ|=%.3e  shape=%@",
+                         relMax(mel, g["mel"]!), MLX.abs(mel - g["mel"]!).max().item(Float.self), "\(mel.shape)"))
         }
 
         if let audioChunkGolden {

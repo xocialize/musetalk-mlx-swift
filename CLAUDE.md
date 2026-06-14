@@ -84,10 +84,18 @@ capability (contract 1.4.0, mlx-engine-swift 0.5.0). `TalkingHeadPackage` (@Infe
 surface; `load()` builds VAE+UNet (quant per config) + the shared WhisperMLX encoder + bisenet;
 `run()` dispatches → Vision crop → whisper encode → getWhisperChunk → per-frame VAE/UNet → bisenet
 blend → mp4. **Compiles** — WhisperMLX (mlx-swift 0.21) reconciled against 0.31.4 with no breakage
-(package platform → `.v26`, tools 6.2). Media I/O (`TalkingHeadIO`: video decode/encode, 80-mel
-log-mel, crop/resize, bisenet paste-back) is **stubbed pending the in-app validation phase**.
+(package platform → `.v26`, tools 6.2).
 
-## Next
-Wire `TalkingHeadIO` (AVFoundation + the 80-mel port + blend) and drive register→prepare→run in the
-MLXEngine Testing app (first real end-to-end). Publish bisenet + (re)confirm MuseTalk weights to
-mlx-community. Whisper encoder dir needs `embed_positions.safetensors` shipped alongside (load()).
+- **80-mel `logMel80`** ✅ ported (core `AudioFeatures`, ships `Resources/mel_filters_80.safetensors`)
+  + gated: `musetalk-cli --mel-golden` → rel 1.4e-4. The full audio path is now Swift: mel →
+  encoder (1.5e-5) → getWhisperChunk (bit-exact).
+- **bisenet weights published**: `mlx-community/face-parsing-bisenet-bf16` (argmax 100% vs torch).
+- **`TalkingHeadIO` container/visual I/O still stubbed** (video decode/encode, audio PCM decode,
+  crop/resize, bisenet paste-back) — these are inherently live-validated → the **xcode/APP-VALIDATION
+  agent** implements + verifies them while driving register→prepare→run.
+
+## Next (xcode / APP-VALIDATION handoff)
+Implement `TalkingHeadIO` (AVFoundation video↔frames, audio→16k PCM, CoreGraphics crop/resize,
+bisenet-masked paste-back) and drive register→prepare→run in the MLXEngine Testing app — the first
+real end-to-end lip-sync. Whisper encoder dir needs `embed_positions.safetensors` shipped alongside
+(load() reads it; else falls back to computed sinusoids). See the workspace `APP-VALIDATION.md` entry.

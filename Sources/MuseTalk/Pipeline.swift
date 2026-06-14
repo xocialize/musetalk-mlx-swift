@@ -6,6 +6,7 @@
 // are upstream preprocessing wired in by the caller; this owns the neural generation.
 import Foundation
 import MLX
+import MLXFFT
 import MLXNN
 
 private let NORM_MEAN: Float = 0.5
@@ -86,6 +87,55 @@ public enum AudioFeatures {
     /// Add sinusoidal PE to (B, seq, d) audio features.
     public static func applyPE(_ x: MLXArray) -> MLXArray {
         x + positionalEncoding(x.dim(1), x.dim(2)).asType(x.dtype)
+    }
+
+    // ---- 80-mel log-mel frontend (mirrors whisper/log_mel.py; HF whisper-tiny exact) ----
+    private static let nFFT = 400, hop = 160, nSamples = 480_000
+
+    private static func melFilters() -> MLXArray {
+        guard let url = Bundle.module.url(forResource: "mel_filters_80", withExtension: "safetensors"),
+              let w = try? loadArrays(url: url), let mel = w["mel_filters"] else {
+            fatalError("missing mel_filters_80.safetensors resource")
+        }
+        return mel   // (201, 80)
+    }
+
+    private static func hann(_ n: Int) -> MLXArray {
+        let k = MLXArray(0 ..< n).asType(.float32)
+        return 0.5 - 0.5 * MLX.cos(2.0 * Float.pi * k / Float(n))
+    }
+
+    private static func reversedGather(_ x: MLXArray, _ lo: Int, _ count: Int) -> MLXArray {
+        // x[lo ..< lo+count] reversed (no flip primitive in mlx-swift)
+        let idx = MLXArray((0 ..< count).reversed().map { Int32(lo + $0) })
+        return MLX.take(x, idx, axis: 0)
+    }
+
+    /// 1-D 16 kHz waveform -> (1, 80, 3000) log-mel. STFT n_fft=400/hop=160, periodic Hann,
+    /// center+reflect pad, power, drop the trailing frame, slaney 80-mel filterbank, log10 clamp.
+    public static func logMel80(_ audio: MLXArray) -> MLXArray {
+        var a = audio.asType(.float32)
+        let n = a.dim(0)
+        if n > nSamples { a = a[0 ..< nSamples] }
+        else if n < nSamples { a = MLX.concatenated([a, MLXArray.zeros([nSamples - n])], axis: 0) }
+
+        // center=True reflect pad by n_fft/2
+        let pad = nFFT / 2
+        let len = a.dim(0)
+        let x = MLX.concatenated([reversedGather(a, 1, pad), a, reversedGather(a, len - pad - 1, pad)], axis: 0)
+
+        let nFrames = 1 + (x.dim(0) - nFFT) / hop
+        let cols = MLXArray(0 ..< nFFT).reshaped(1, nFFT)
+        let rows = (MLXArray(0 ..< nFrames) * Int32(hop)).reshaped(nFrames, 1)
+        let frames = MLX.take(x, cols + rows, axis: 0) * hann(nFFT).reshaped(1, nFFT)   // (nFrames, nFFT)
+
+        let spec = MLXFFT.rfft(frames, axis: -1)                  // (nFrames, 201) complex
+        let power = MLX.abs(spec).square()[0 ..< (nFrames - 1)]   // drop last frame -> (3000, 201)
+        let mel = power.matmul(melFilters())                     // (3000, 80)
+        var log = MLX.log10(MLX.maximum(mel, 1e-10))
+        log = MLX.maximum(log, log.max() - 8.0)
+        log = (log + 4.0) / 4.0
+        return log.transposed(1, 0).expandedDimensions(axis: 0)  // (1, 80, 3000)
     }
 
     /// stacked (1, seq, nHidden, 384) -> (numFrames, 10*nHidden, 384). Faithful port of

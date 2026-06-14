@@ -33,7 +33,9 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
-            ]
+                .product(name: "MLXFFT", package: "mlx-swift"),
+            ],
+            resources: [.copy("Resources/mel_filters_80.safetensors")]
         ),
         // MLXEngine ModelPackage wrapper (the `talkingHead` surface). Engine-aware; the core
         // `MuseTalk` target stays engine-agnostic.
