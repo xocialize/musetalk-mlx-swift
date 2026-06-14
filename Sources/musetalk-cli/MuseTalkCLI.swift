@@ -26,6 +26,12 @@ struct MuseTalkCLI: AsyncParsableCommand {
     @Option(help: "Quantize the UNet before load (bits: 8 or 4; group_size 64). Implies GPU.")
     var unetQuant: Int?
 
+    @Option(help: "S2 pipeline parity golden (.safetensors: img/latents/pred/recon); needs --vae-weights")
+    var pipelineGolden: String?
+
+    @Option(help: "S2 audio-framing golden (.safetensors: stacked/chunks/librosa_length)")
+    var audioChunkGolden: String?
+
     @Flag(help: "Run on GPU (default CPU = true fp32 parity)")
     var gpu = false
 
@@ -100,6 +106,31 @@ struct MuseTalkCLI: AsyncParsableCommand {
             let recon = vae.decode(g["latent"]!)
             eval(recon)
             print(String(format: "[S1] VAE decode recon   rel=%.3e", relMax(recon, g["recon"]!)))
+        }
+
+        if let pipelineGolden, let vaeWeights {
+            let vae = AutoencoderKL()
+            try MuseTalkWeights.load(vae, from: URL(fileURLWithPath: vaeWeights))
+            let pipe = MuseTalkPipeline(vae: vae, unet: UNet2DConditionModel())
+            let g = try loadArrays(url: URL(fileURLWithPath: pipelineGolden))
+            // stage 1: img (256,256,3 uint8 BGR) -> 8-ch latent
+            let latents = pipe.getLatentsForUnet(g["img"]!)
+            eval(latents)
+            print(String(format: "[S2] pipeline latents   rel=%.3e", relMax(latents, g["latents"]!)))
+            // stage 3: pred (1,4,32,32) -> recon uint8 BGR; gate on integer pixel diff (≤2/255 doctrine)
+            let recon = pipe.decodeLatents(g["pred"]!)
+            eval(recon)
+            let diff = MLX.abs(recon.asType(.int32) - g["recon"]!.asType(.int32))
+            print(String(format: "[S2] pipeline recon     max|d|=%d/255  mean|d|=%.4f  shape=%@",
+                         diff.max().item(Int32.self), diff.asType(.float32).mean().item(Float.self), "\(recon.shape)"))
+        }
+
+        if let audioChunkGolden {
+            let g = try loadArrays(url: URL(fileURLWithPath: audioChunkGolden))
+            let len = Int(g["librosa_length"]!.item(Int32.self))
+            let chunks = AudioFeatures.getWhisperChunk(g["stacked"]!, librosaLength: len)
+            eval(chunks)
+            print(String(format: "[S2] audio chunks       rel=%.3e  shape=%@", relMax(chunks, g["chunks"]!), "\(chunks.shape)"))
         }
     }
 }

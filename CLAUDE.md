@@ -18,7 +18,8 @@ the Python `musetalk-mlx` package (`/Volumes/DEV_ARCHIVE/musetalk-mlx`, publishe
 |---|---|---|
 | VAE (`AutoencoderKL`, SD1.x 4-ch) | `sd-vae-ft-mse` | S0 key-contract 248/248 ✅ · S1 forward **bit-exact** ✅ |
 | UNet (`UNet2DConditionModel`, 8→4ch, cross=384, t=0) | `musetalkV15/unet.pth` | S0 686/686 ✅ · S1 **bit-exact** ✅ · q8 cosine **1.00000** / q4 **0.99984** ✅ |
-| Whisper-tiny audio encoder | shared `WhisperMLX` core (v0.1.0) | done in whisper-mlx-swift; wired with the pipeline |
+| Pipeline (face path + audio framing) | `pipeline_mlx.py` + `audio2feature.py` | S2 img→latents rel 0.000 · pred→recon **max\|Δ\|=0/255** · getWhisperChunk rel 0.000 ✅ |
+| Whisper-tiny audio encoder | shared `WhisperMLX` core (v0.1.0) | gated there (1.5e-5); composed by transitivity, wired at the engine wrapper (where the mlx-swift graph resolves) |
 
 S1 parity is **bit-exact** (rel 0.000) because both sides are `mlx::core` — gated against the
 Python-MLX reference on the *same published fp16 weights, fp32 compute* (cross-validate same-
@@ -64,6 +65,6 @@ mlx-swift `from: 0.30.0` (resolves 0.31.4), matching `qwen-image-edit-swift`. Th
 (the talkingHead package will depend on both).
 
 ## Next
-Pipeline.swift (mask → VAE.encode×2 → cat8 → UNet(t=0) → VAE.decode → blend; audio path
-`get_whisper_chunk` + sinusoidal PE consuming WhisperMLX; gate vs `pipeline_golden`) → face
-preprocessing ports (S3FD/DWPose/bisenet, faithful) → `talkingHead` engine wrapper.
+Neural pipeline complete + bit-exact. Remaining: face preprocessing ports (S3FD/DWPose/bisenet,
+faithful — each needs a PyTorch→MLX pass, no Python-MLX donor) → `talkingHead` engine wrapper
+(adds the WhisperMLX dep + reconciles the mlx-swift graph; wires encoder→getWhisperChunk).
