@@ -77,7 +77,17 @@ mlx-swift `from: 0.30.0` (resolves 0.31.4), matching `qwen-image-edit-swift`. Th
   avoided. `musetalk-cli --vision-crop-golden`.
 - **S3FD dropped** — Vision's face `boundingBox` is the fallback (`FaceCrop.fallbackBox`).
 
+## Engine wrapper — MLXTalkingHead
+`MLXTalkingHead` target wraps the core as an MLXEngine `ModelPackage` for the `talkingHead`
+capability (contract 1.4.0, mlx-engine-swift 0.5.0). `TalkingHeadPackage` (@InferenceActor) +
+`TalkingHeadConfiguration`; manifest = MIT both layers, ~8 GB fp16 footprint, one talkingHead
+surface; `load()` builds VAE+UNet (quant per config) + the shared WhisperMLX encoder + bisenet;
+`run()` dispatches → Vision crop → whisper encode → getWhisperChunk → per-frame VAE/UNet → bisenet
+blend → mp4. **Compiles** — WhisperMLX (mlx-swift 0.21) reconciled against 0.31.4 with no breakage
+(package platform → `.v26`, tools 6.2). Media I/O (`TalkingHeadIO`: video decode/encode, 80-mel
+log-mel, crop/resize, bisenet paste-back) is **stubbed pending the in-app validation phase**.
+
 ## Next
-`talkingHead` engine wrapper (new Capability case + ModelPackage; adds the WhisperMLX dep +
-reconciles the mlx-swift graph; wires encoder→getWhisperChunk→pipeline→bisenet blend). bisenet
-weights still to publish to mlx-community.
+Wire `TalkingHeadIO` (AVFoundation + the 80-mel port + blend) and drive register→prepare→run in the
+MLXEngine Testing app (first real end-to-end). Publish bisenet + (re)confirm MuseTalk weights to
+mlx-community. Whisper encoder dir needs `embed_positions.safetensors` shipped alongside (load()).
