@@ -32,6 +32,12 @@ struct MuseTalkCLI: AsyncParsableCommand {
     @Option(help: "S2 audio-framing golden (.safetensors: stacked/chunks/librosa_length)")
     var audioChunkGolden: String?
 
+    @Option(help: "bisenet parity golden (.safetensors: input/feat_out/argmax); needs --bisenet-weights")
+    var bisenetGolden: String?
+
+    @Option(help: "Converted bisenet_mlx.safetensors weights")
+    var bisenetWeights: String?
+
     @Flag(help: "Run on GPU (default CPU = true fp32 parity)")
     var gpu = false
 
@@ -123,6 +129,20 @@ struct MuseTalkCLI: AsyncParsableCommand {
             let diff = MLX.abs(recon.asType(.int32) - g["recon"]!.asType(.int32))
             print(String(format: "[S2] pipeline recon     max|d|=%d/255  mean|d|=%.4f  shape=%@",
                          diff.max().item(Int32.self), diff.asType(.float32).mean().item(Float.self), "\(recon.shape)"))
+        }
+
+        if let bisenetGolden, let bisenetWeights {
+            let net = BiSeNet()
+            net.train(false)   // BatchNorm: use running stats (eval)
+            try MuseTalkWeights.load(net, from: URL(fileURLWithPath: bisenetWeights))
+            let g = try loadArrays(url: URL(fileURLWithPath: bisenetGolden))
+            let pred = net(g["input"]!)
+            eval(pred)
+            let maxAbs = MLX.abs(pred - g["feat_out"]!).max().item(Float.self)
+            let predArg = argMax(pred, axis: 1).asType(.int32)
+            let agree = (predArg .== g["argmax"]!.asType(.int32)).asType(.float32).mean().item(Float.self)
+            print(String(format: "[BISENET] feat_out max_abs=%.3e  argmax agree=%.4f%%  shape=%@",
+                         maxAbs, agree * 100, "\(pred.shape)"))
         }
 
         if let audioChunkGolden {

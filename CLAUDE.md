@@ -19,6 +19,7 @@ the Python `musetalk-mlx` package (`/Volumes/DEV_ARCHIVE/musetalk-mlx`, publishe
 | VAE (`AutoencoderKL`, SD1.x 4-ch) | `sd-vae-ft-mse` | S0 key-contract 248/248 ✅ · S1 forward **bit-exact** ✅ |
 | UNet (`UNet2DConditionModel`, 8→4ch, cross=384, t=0) | `musetalkV15/unet.pth` | S0 686/686 ✅ · S1 **bit-exact** ✅ · q8 cosine **1.00000** / q4 **0.99984** ✅ |
 | Pipeline (face path + audio framing) | `pipeline_mlx.py` + `audio2feature.py` | S2 img→latents rel 0.000 · pred→recon **max\|Δ\|=0/255** · getWhisperChunk rel 0.000 ✅ |
+| bisenet face-parser (preprocessing) | torch `face_parsing/{model,resnet}.py` (PyTorch→MLX) | feat_out **max_abs 8.3e-6** · argmax **100%** vs torch ✅ (BatchNorm eval + bilinear align_corners) |
 | Whisper-tiny audio encoder | shared `WhisperMLX` core (v0.1.0) | gated there (1.5e-5); composed by transitivity, wired at the engine wrapper (where the mlx-swift graph resolves) |
 
 S1 parity is **bit-exact** (rel 0.000) because both sides are `mlx::core` — gated against the
@@ -64,7 +65,14 @@ mlx-swift `from: 0.30.0` (resolves 0.31.4), matching `qwen-image-edit-swift`. Th
 `WhisperMLX` core is pinned at 0.21.0 — **reconcile to one mlx-swift graph at wrapper link time**
 (the talkingHead package will depend on both).
 
+## Face preprocessing (PyTorch→MLX; no Python-MLX donor)
+- **bisenet** (blend mask) ✅ ported. Weights converted offline by `scripts/convert_capture_bisenet.py`
+  (79999_iter.pth → clean MLX keys: `downsample.0/.1`→`conv/bn`, drop `num_batches_tracked`, conv
+  transpose; legacy-tar needs `weights_only=False`). Gotcha: mlx-swift `MaxPool2d` pads the wrong
+  axes for NHWC — pad H,W with −∞ yourself, `padding: 0` (see `BiSeNet.swift`).
+- **DWPose → Apple Vision** for the crop (validate vs the dvisual `extract_landmarks.py` golden).
+- **S3FD** (fallback bbox) — faithful Swift-MLX port, pending.
+
 ## Next
-Neural pipeline complete + bit-exact. Remaining: face preprocessing ports (S3FD/DWPose/bisenet,
-faithful — each needs a PyTorch→MLX pass, no Python-MLX donor) → `talkingHead` engine wrapper
-(adds the WhisperMLX dep + reconciles the mlx-swift graph; wires encoder→getWhisperChunk).
+S3FD port + Vision crop → `talkingHead` engine wrapper (adds the WhisperMLX dep + reconciles the
+mlx-swift graph; wires encoder→getWhisperChunk). bisenet weights still to publish to mlx-community.
