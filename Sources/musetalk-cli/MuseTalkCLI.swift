@@ -2,6 +2,12 @@ import ArgumentParser
 import Foundation
 import MLX
 import MuseTalk
+#if canImport(Vision)
+import CoreGraphics
+import ImageIO
+#endif
+
+struct CropEntry: Decodable { let frame: String; let coords: [Double] }
 
 @main
 struct MuseTalkCLI: AsyncParsableCommand {
@@ -37,6 +43,9 @@ struct MuseTalkCLI: AsyncParsableCommand {
 
     @Option(help: "Converted bisenet_mlx.safetensors weights")
     var bisenetWeights: String?
+
+    @Option(help: "Vision face-crop validation golden (JSON [{frame, coords:[x1,y1,x2,y2]}])")
+    var visionCropGolden: String?
 
     @Flag(help: "Run on GPU (default CPU = true fp32 parity)")
     var gpu = false
@@ -145,6 +154,10 @@ struct MuseTalkCLI: AsyncParsableCommand {
                          maxAbs, agree * 100, "\(pred.shape)"))
         }
 
+        if let visionCropGolden {
+            try validateVisionCrop(visionCropGolden)
+        }
+
         if let audioChunkGolden {
             let g = try loadArrays(url: URL(fileURLWithPath: audioChunkGolden))
             let len = Int(g["librosa_length"]!.item(Int32.self))
@@ -152,5 +165,35 @@ struct MuseTalkCLI: AsyncParsableCommand {
             eval(chunks)
             print(String(format: "[S2] audio chunks       rel=%.3e  shape=%@", relMax(chunks, g["chunks"]!), "\(chunks.shape)"))
         }
+    }
+
+    /// Validate the Vision-derived crop box against the dvisual DWPose golden crops (IoU + edge offset).
+    func validateVisionCrop(_ path: String) throws {
+        #if canImport(Vision)
+        let entries = try JSONDecoder().decode([CropEntry].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        var ious: [Double] = []
+        var sdx1 = 0.0, sdy1 = 0.0, sdx2 = 0.0, sdy2 = 0.0
+        var detected = 0
+        for e in entries {
+            guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: e.frame) as CFURL, nil),
+                  let img = CGImageSourceCreateImageAtIndex(src, 0, nil),
+                  let b = FaceCrop.crop(cgImage: img) else { continue }
+            detected += 1
+            let g = e.coords.map { Int($0) }   // [x1,y1,x2,y2]
+            let ix1 = max(b.x1, g[0]), iy1 = max(b.y1, g[1]), ix2 = min(b.x2, g[2]), iy2 = min(b.y2, g[3])
+            let inter = Double(max(0, ix2 - ix1) * max(0, iy2 - iy1))
+            let union = Double((b.x2 - b.x1) * (b.y2 - b.y1) + (g[2] - g[0]) * (g[3] - g[1])) - inter
+            ious.append(union > 0 ? inter / union : 0)
+            sdx1 += Double(b.x1 - g[0]); sdy1 += Double(b.y1 - g[1])
+            sdx2 += Double(b.x2 - g[2]); sdy2 += Double(b.y2 - g[3])
+        }
+        let n = Double(max(detected, 1))
+        print(String(format: "[VISION-CROP] frames=%d detected=%d (%.1f%%)  mean IoU=%.4f",
+                     entries.count, detected, Double(detected) / Double(entries.count) * 100, ious.reduce(0, +) / n))
+        print(String(format: "[VISION-CROP] mean signed Δ (vision - golden): x1=%+.1f y1=%+.1f x2=%+.1f y2=%+.1f px",
+                     sdx1 / n, sdy1 / n, sdx2 / n, sdy2 / n))
+        #else
+        print("[VISION-CROP] Vision unavailable on this platform")
+        #endif
     }
 }

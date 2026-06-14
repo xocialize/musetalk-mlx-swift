@@ -65,14 +65,19 @@ mlx-swift `from: 0.30.0` (resolves 0.31.4), matching `qwen-image-edit-swift`. Th
 `WhisperMLX` core is pinned at 0.21.0 — **reconcile to one mlx-swift graph at wrapper link time**
 (the talkingHead package will depend on both).
 
-## Face preprocessing (PyTorch→MLX; no Python-MLX donor)
+## Face preprocessing — RESOLVED
 - **bisenet** (blend mask) ✅ ported. Weights converted offline by `scripts/convert_capture_bisenet.py`
   (79999_iter.pth → clean MLX keys: `downsample.0/.1`→`conv/bn`, drop `num_batches_tracked`, conv
   transpose; legacy-tar needs `weights_only=False`). Gotcha: mlx-swift `MaxPool2d` pads the wrong
   axes for NHWC — pad H,W with −∞ yourself, `padding: 0` (see `BiSeNet.swift`).
-- **DWPose → Apple Vision** for the crop (validate vs the dvisual `extract_landmarks.py` golden).
-- **S3FD** (fallback bbox) — faithful Swift-MLX port, pending.
+- **Crop → Apple Vision** ✅ (`FaceCrop.swift`, `canImport(Vision)`). `VNDetectFaceLandmarks` →
+  MuseTalk crop formula (extent + nose-bridge-centered top). Nose ref = **`noseCrest`** (the bridge),
+  NOT the full nose outline (whose centroid sits 25px low → crop top 50px off). Validated vs the
+  dvisual DWPose golden (268 frames): **IoU 0.92, all edges ≤11px, 100% detection** — DWPose port
+  avoided. `musetalk-cli --vision-crop-golden`.
+- **S3FD dropped** — Vision's face `boundingBox` is the fallback (`FaceCrop.fallbackBox`).
 
 ## Next
-S3FD port + Vision crop → `talkingHead` engine wrapper (adds the WhisperMLX dep + reconciles the
-mlx-swift graph; wires encoder→getWhisperChunk). bisenet weights still to publish to mlx-community.
+`talkingHead` engine wrapper (new Capability case + ModelPackage; adds the WhisperMLX dep +
+reconciles the mlx-swift graph; wires encoder→getWhisperChunk→pipeline→bisenet blend). bisenet
+weights still to publish to mlx-community.
