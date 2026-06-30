@@ -26,12 +26,26 @@ public final class TalkingHeadPackage: ModelPackage {
                 tier: 3
             ),
             requirements: RequirementsManifest(
-                // Measured peak (Python port): ~7 GB fp16 at bs=8 realtime; declare just above.
-                // Quant variants shrink the UNet only (VAE+audio fp16) — slightly lower peak.
+                // SPLIT footprint (engine 1.14 / QuantConfigured). The pre-split flat numbers
+                // (fp16 8 / int8 7 / int4 6.5 GB) BAKED the bs=8 per-frame activation into residency
+                // (manifest measured ~7 GB peak fp16 @ bs=8) — the over-reserve the split fixes.
+                //   residentBytes = the weights floor held resident through the per-frame loop:
+                //     VAE (fp32-loaded ~0.67 GB) + UNet (quant-dependent) + whisper-tiny (~75 MB) +
+                //     bisenet (~50 MB). Only the UNet shrinks with quant (VAE+audio+bisenet stay fp16/fp32).
+                //   peakActivationBytes = the bs=8 per-frame UNet+VAE forward transient — largely
+                //     dtype-INDEPENDENT (the co-residency premise: activation tracks the bs=8 working set,
+                //     not the weight quant), so the SAME ~4.5 GB across quants. Σ stays at/under the prior
+                //     flat (fp16 ~7 / int8 ~6.2 / int4 ~5.8 GB) while letting a co-resident share the
+                //     single activation reserve. whisper-tiny is per-frame-idle but ~75 MB → kept resident
+                //     (P2 evict skipped, see NOTE); bisenet runs per-frame → must stay.
+                // NOTE: residentBytes derived from on-disk weight sizes (VAE fp32 + UNet@quant + whisper +
+                // bisenet); peakActivationBytes = bs=8 derived est from the ~7 GB Python-port peak. BOTH are
+                // smoke/derived — in-app phys re-baseline PENDING (MLXEngineVideo/LTXVideoTesting), process
+                // phys_footprint (R-MEM-1/admission) reads ~2.5–2.9× a smoke MLX-peak.
                 footprints: [
-                    QuantFootprint(quant: .fp16, residentBytes: 8_000_000_000),
-                    QuantFootprint(quant: .int8, residentBytes: 7_000_000_000),
-                    QuantFootprint(quant: .int4, residentBytes: 6_500_000_000),
+                    QuantFootprint(quant: .fp16, residentBytes: 2_500_000_000, peakActivationBytes: 4_500_000_000),
+                    QuantFootprint(quant: .int8, residentBytes: 1_700_000_000, peakActivationBytes: 4_500_000_000),
+                    QuantFootprint(quant: .int4, residentBytes: 1_300_000_000, peakActivationBytes: 4_500_000_000),
                 ],
                 requiredBackends: [.metalGPU],
                 os: OSRequirement(minMacOS: SemanticVersion(major: 26, minor: 0, patch: 0)),
@@ -105,6 +119,9 @@ public final class TalkingHeadPackage: ModelPackage {
         whisper = nil
         whisperPosEmb = nil
         bisenet = nil
+        // Dropping the refs alone leaves the weight/activation buffers in MLX's pool, so
+        // phys_footprint doesn't fall and engine.evict / R-MEM-1 can't reclaim. Flush the pool.
+        MLX.Memory.clearCache()
     }
 
     public func run(_ request: any CapabilityRequest) async throws -> any CapabilityResponse {
@@ -133,8 +150,12 @@ public final class TalkingHeadPackage: ModelPackage {
         let frames = try TalkingHeadIO.decodeFrames(request.source.data)
         let fps = request.fps ?? request.source.frameRate ?? 25
         let wav = try TalkingHeadIO.decodeAudioPCM(request.audio.data)
-        let mel = try TalkingHeadIO.logMel80(wav)                              // (1,80,3000*)
-        let stacked = whisper.encoderHiddenStates(mel, positionEmbedding: whisperPosEmb)
+        let mel = try TalkingHeadIO.logMel80(wav)                              // (1,80,3000*) PyTorch (B,nMels,T)
+        // The WhisperMLX AudioEncoder consumes channels-LAST mel — (B, T, nMels) — and does NOT
+        // transpose internally (Whisper.swift docs conv1 input as (B,T,nMels)). logMel80 is gated at
+        // the conventional (B,nMels,T) layout, so transpose at this seam: (0,2,1) → (1,3000,80).
+        let melCL = mel.transposed(0, 2, 1)
+        let stacked = whisper.encoderHiddenStates(melCL, positionEmbedding: whisperPosEmb)
         let chunks = AudioFeatures.getWhisperChunk(stacked, librosaLength: wav.dim(0), fps: Int(fps))
 
         // 2. per-frame: Vision crop -> latent -> UNet(t=0, audio) -> decode -> bisenet blend -> paste.

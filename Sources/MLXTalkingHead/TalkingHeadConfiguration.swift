@@ -9,7 +9,7 @@ import MLXToolKit
 ///   - `modelDirectory` → a resolved MuseTalk dist dir (`{vae,unet,whisper_encoder}.safetensors`
 ///     + `config.json`); else HF download of `repo`.
 ///   - `whisperEncoderDirectory` / `bisenetWeights` resolve the shared audio encoder + face parser.
-public struct TalkingHeadConfiguration: PackageConfiguration, ModelStorable {
+public struct TalkingHeadConfiguration: PackageConfiguration, ModelStorable, QuantConfigured {
     /// Published MuseTalk variant repo id (also the provenance source).
     public var repo: String
     public var revision: String?
