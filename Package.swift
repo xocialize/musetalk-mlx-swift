@@ -22,7 +22,7 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift.git", from: "0.30.0"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
         // MLXEngine contract (Foundation-only) for the wrapper target.
-        .package(url: "https://github.com/xocialize/mlx-engine-swift", from: "0.5.0"),
+        .package(url: "https://github.com/xocialize/mlx-engine-swift", from: "0.17.0"),
         // Shared whisper-tiny audio encoder core (v0.2.0+ = swift-transformers 1.x, so it
         // co-resolves with the engine / wan-core 1.x ecosystem in the app graph — E12).
         .package(url: "https://github.com/xocialize/whisper-mlx-swift.git", from: "0.2.0"),
